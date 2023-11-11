@@ -189,9 +189,6 @@ class waterworld_ppo():
         '''
         create a plot of the rewards for the evaluation loops
         '''
-        
-        # going to use this a lot
-        agents = self.env.possible_agents
 
         if not os.path.exists(self.reward_csv_file):
             print('No data found from evaluation loops. Run eval() or interlace_run()')
@@ -199,13 +196,14 @@ class waterworld_ppo():
 
         log_pd = pd.read_csv(self.reward_csv_file) # easier than csv reader
         games = log_pd['GameNumber'].unique()
-        log_pd_games = log_pd.groupby('GameNumber').mean()
+        agents = [key for key in log_pd.keys() if 'pursuer' in key]
 
-        # create a stacked plot with the mean from the games
-        plt.stackplot(log_pd_games['StepCount'],[log_pd_games[agent] for agent in agents])
-        
+        # create a stacked plot with the mean from all games
+        log_pd_mean = log_pd.groupby('StepCount').mean()
+        plt.stackplot(log_pd_mean['StepCount'],[log_pd_mean[agent] for agent in agents])
+
+        # subplot for each game 
         fig,axs = plt.subplots(nrows = len(agents))
-        
         for ii_agent, agent in enumerate(agents):
             for game in games:
                 game_idx = log_pd['GameNumber'].eq(game).index

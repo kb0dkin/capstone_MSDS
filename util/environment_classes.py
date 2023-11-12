@@ -21,7 +21,7 @@ class waterworld_ppo():
     Makes it easier to store straining status and evaluate etc
     '''
     
-    def __init__(self, log_dir:str = './log_dir', seed:int = 42, 
+    def __init__(self, log_dir:str = './log_dir', seed:int = None, 
                  n_envs:int = 8, **env_kwargs):
         '''
         Initialization function. Sets up the environment and learning algorithm
@@ -36,20 +36,20 @@ class waterworld_ppo():
             n_envs      :   how many environments to run in parallel
         '''
 
-        # initialize the environment
-        env = waterworld_v4.parallel_env(**env_kwargs) # initialize environment
-        env.reset() # so long and thanks for all the fish
-        pprint(env)
-        possible_agents = env.possible_agents # have to grab this before we wrap it in a vectorized environment
+        # initialize the environments
+        train_env = waterworld_v4.parallel_env(**env_kwargs) # training environment
+        eval_env = waterworld_v4.env(**env_kwargs) # eval environment
+        train_env.reset() # so long and thanks for all the fish
+        possible_agents = train_env.possible_agents # have to grab this before we wrap it in a vectorized environment
 
         # train N environments in parallel
-        env = ss.pettingzoo_env_to_vec_env_v1(env) # vectorize that stuff
-        env = ss.concat_vec_envs_v1(vec_env= env, num_vec_envs= n_envs, num_cpus = 2, base_class='stable_baselines3')
+        train_env = ss.pettingzoo_env_to_vec_env_v1(train_env) # vectorize that stuff
+        train_env = ss.concat_vec_envs_v1(vec_env= train_env, num_vec_envs= n_envs, num_cpus = 2, base_class='stable_baselines3')
 
         # initialize the model
         model = PPO(
             policy = PPOMlpPolicy,
-            env=env,
+            env=train_env,
             tensorboard_log=os.path.join(log_dir,'tensorboard_logs'),
             learning_rate=1e-3,
             batch_size=256
@@ -74,7 +74,8 @@ class waterworld_ppo():
             writer.writerow(header_row)
 
         # store parameters in instance
-        self.env = env # environment
+        self.env = train_env # training environment
+        self.eval_env = eval_env # evaluation environment
         self.model = model # model
         self.log_dir = log_dir # for storing model checkpoints and tensorboard data
         self.reward_csv_file = os.path.join(log_dir,'reward_logs.csv') # to store the rewards for a csv
@@ -91,11 +92,6 @@ class waterworld_ppo():
         Args:
             num_steps   :   steps per training round
         '''
-
-        # if self.curr_chk is not None:
-        #     model = PPO.load(os.path.join(self.log_dir, self.curr_chk), env=self.env)
-        # else:
-        #     model = self.model # might be able to just do this, instead of reloading
 
         self.model.learn(total_timesteps= num_steps) # does this save in-place? seems to return a model
 
@@ -116,17 +112,14 @@ class waterworld_ppo():
             render_mode :   how/if to display the outputs of the games.
         '''
 
-        # # get the current checkpoint. If there isn't one, it's going to run off the randomly initialized values
-        # if self.curr_chk is not None:
-        #     model = PPO.load(os.path.join(self.log_dir, self.curr_chk)) # load current checkpoint
-        # else:
-        #     model = self.model
         model = self.model
 
-        # apparently we're running this through AEC instead of Parallel. Not sure why...
-        # Don't need to wrap this in SS since we're only running one environment at a time
-        env_kwargs = self.env_kwargs # load in old one
-        env = waterworld_v4.env(render_mode=render_mode, **env_kwargs)
+        # # apparently we're running this through AEC instead of Parallel. Not sure why...
+        # # Don't need to wrap this in SS since we're only running one environment at a time
+        # env_kwargs = self.env_kwargs # load in old one
+        # env = waterworld_v4.env(render_mode=render_mode, **env_kwargs)
+
+        env = self.eval_env
 
         # open the reward csv log
         fid =  open(self.reward_csv_file,'a')
@@ -240,6 +233,33 @@ class waterworld_ppo():
             axs[ii_agent].set_ylabel('Total Rewards per Game')
             axs[ii_agent].set_title(f'Rewards for 10 different games, {agent}')
         axs[-1].set_xlabel('Training Step')
+
+
+
+    def render_version(self, quality:str = 'best', checkpoint_name:str = None, step_num:int = None):
+        '''
+        Render a specific checkpoint and save a video.
+        The user can either specify the "quality" of the checkpoint (best or worst), 
+        the checkpoint name (name of the .zip file) or the training step number.
+        
+        Default is to render the best mean agent reward.
+
+        Only allows one argument at a time.
+        
+        Args:
+            quality         :   'best' or 'worst' ['best']
+            checkpoint_name :   name of .zip checkpoint file
+            step_num        :   training step number
+        '''
+
+        # run either the best or worst
+        if quality is not None:
+            # override the other two
+            checkpoint_name = None
+            step_num = None
+            # load the csv log so we can figure out which timepoint is the best
+            log_pd = pd.read_csv(self.reward_csv_file)
+            log_pd_mean = log_pd.groupby('Timestamp')[[key for key in log_pd.keys() if 'pursuer' in key]].mean()
 
 
 

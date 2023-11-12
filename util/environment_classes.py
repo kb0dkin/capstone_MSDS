@@ -3,6 +3,7 @@ import time
 import csv
 import pandas as pd
 from matplotlib import pyplot as plt
+from pprint import pprint
 
 import supersuit as ss
 from stable_baselines3 import PPO
@@ -37,7 +38,8 @@ class waterworld_ppo():
 
         # initialize the environment
         env = waterworld_v4.parallel_env(**env_kwargs) # initialize environment
-        env.reset(seed) # so long and thanks for all the fish
+        env.reset() # so long and thanks for all the fish
+        pprint(env)
         possible_agents = env.possible_agents # have to grab this before we wrap it in a vectorized environment
 
         # train N environments in parallel
@@ -182,7 +184,7 @@ class waterworld_ppo():
         for loop in range(num_loops):
             self.train(num_steps=num_steps)
             self.eval(num_games=num_games)
-            print(f"Finished loop {loop} of {num_loops}")
+            print(f"Finished loop {loop+1} of {num_loops}")
 
 
     def plot_rewards(self):
@@ -197,17 +199,48 @@ class waterworld_ppo():
         log_pd = pd.read_csv(self.reward_csv_file) # easier than csv reader
         games = log_pd['GameNumber'].unique()
         agents = [key for key in log_pd.keys() if 'pursuer' in key]
+        
+        # get the means and the standard deviations
+        log_pd_mean = log_pd.groupby('TrainingStepCount')[agents].mean()
+        log_pd_sd = log_pd.groupby('TrainingStepCount')[agents].std()
+
+        # put together a colormap so the standard devs will match
+        cmap = plt.get_cmap('tab10')
 
         # create a stacked plot with the mean from all games
-        log_pd_mean = log_pd.groupby('StepCount').mean()
-        plt.stackplot(log_pd_mean['StepCount'],[log_pd_mean[agent] for agent in agents])
+        fig_stack_mean, ax_stack_mean = plt.subplots()
+        plt.stackplot(log_pd_mean.index,[log_pd_mean[agent] for agent in agents], alpha=0.5)
+        ax_stack_mean.set_xlabel('Training Step')
+        ax_stack_mean.set_ylabel('Rewards per Game')
+        ax_stack_mean.set_title(f'Mean Reward Counts Summed Across Agents')
+        ax_stack_mean.legend([agent for agent in agents])
 
-        # subplot for each game 
-        fig,axs = plt.subplots(nrows = len(agents))
+        # line plots with patches for the standard deviations
+        fig_sd, ax_sd = plt.subplots()
+        for ii_agent,agent in enumerate(agents):
+            ax_sd.plot(log_pd_mean.index,log_pd_mean[agent], label = agent, color=cmap(ii_agent))
+            above_std = log_pd_mean[agent] + log_pd_sd[agent]
+            below_std = log_pd_mean[agent] - log_pd_sd[agent]
+            ax_sd.fill_between(log_pd_mean.index, above_std, below_std, color=cmap(ii_agent), alpha=0.25)
+        ax_sd.set_xlabel('Training Step')
+        ax_sd.set_ylabel('Total Rewards per Game')
+        ax_sd.set_title(f'Mean Rewards, with Standard Deviations')
+        ax_sd.legend()
+        
+
+        # plot all games individual, subplot for each agent
+        fig,axs = plt.subplots(nrows = len(agents), squeeze=False, sharex=True)
+        axs = axs.flatten() # to get a 1D array no matter the number of agents we have
         for ii_agent, agent in enumerate(agents):
             for game in games:
-                game_idx = log_pd['GameNumber'].eq(game).index
-                axs[ii_agent].plot(log_pd['StepCount'].iloc[game_idx], log_pd[agent].iloc[game_idx])
+                game_idx = log_pd['GameNumber'].eq(game)
+                axs[ii_agent].plot(log_pd['TrainingStepCount'].loc[game_idx], log_pd[agent].loc[game_idx], label=f'Game {game}')
+            
+            axs[ii_agent].legend()
+            axs[ii_agent].set_ylabel('Total Rewards per Game')
+            axs[ii_agent].set_title(f'Rewards for 10 different games, {agent}')
+        axs[-1].set_xlabel('Training Step')
+
 
 
 

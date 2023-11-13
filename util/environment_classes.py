@@ -4,6 +4,7 @@ import csv
 import pandas as pd
 from matplotlib import pyplot as plt
 from pprint import pprint
+import numpy as np
 
 import supersuit as ss
 from stable_baselines3 import PPO
@@ -96,7 +97,7 @@ class waterworld_ppo():
         self.model.learn(total_timesteps= num_steps) # does this save in-place? seems to return a model
 
         # save the current model checkpoint
-        self.curr_chk = f"{self.env.unwrapped.metadata.get('name')}_{time.strftime('%Y%m%d_%H%M%S')}"
+        self.curr_chk = f"{self.env.unwrapped.metadata.get('name')}_{self.train_stepcount:09d}"
         self.model.save(os.path.join(self.log_dir,self.curr_chk)) # save in the current file name
         self.train_stepcount += num_steps # keep track of how many steps we have trained
 
@@ -236,9 +237,9 @@ class waterworld_ppo():
 
 
 
-    def render_version(self, quality:str = 'best', checkpoint_name:str = None, step_num:int = None):
+    def load_version(self, quality:str = 'best', checkpoint_name:str = None, step_num:int = None):
         '''
-        Render a specific checkpoint and save a video.
+        load a specific checkpoint and save a video.
         The user can either specify the "quality" of the checkpoint (best or worst), 
         the checkpoint name (name of the .zip file) or the training step number.
         
@@ -259,7 +260,74 @@ class waterworld_ppo():
             step_num = None
             # load the csv log so we can figure out which timepoint is the best
             log_pd = pd.read_csv(self.reward_csv_file)
-            log_pd_mean = log_pd.groupby('Timestamp')[[key for key in log_pd.keys() if 'pursuer' in key]].mean()
+            log_pd_mean = log_pd.groupby('TrainStepCount')[[key for key in log_pd.keys() if 'pursuer' in key]].mean()
+            # find the best/worst training epoch
+            if quality is 'best':
+                extrema_ind = log_pd_mean.sum(axis=1).argmax() # training iteration with best total rewards
+            if quality is 'worst':
+                extrema_ind = log_pd_mean.sum(axis=1).argmin() # training iteration with worst total rewards
+
+            extrema_step = log_pd_mean.index[extrema_ind] # get the stepcount with greatest average rewards
+            ck_name = f"{self.env.unwrapped.metadata['name']}_{extrema_step:09d}"
+            full_checkpoint = os.path.join(self.log_dir,ck_name) 
+
+        # a specific checkpoint name
+        if checkpoint_name is not None:
+            full_checkpoint = os.path.join(self.log_dir, checkpoint_name)
+            step_num = None
+            if not os.path.exists(full_checkpoint+'.zip'):
+                print(f'Could not find {checkpoint_name}')
+                return -1
+
+        # a specific training epoch
+        # should add checking (make sure it's an epoch we have a csv for)
+        # but not for now
+        if step_num is not None:
+            ck_name = f"{self.env.unwrapped.metadata['name']}_{step_num:09d}"
+            full_checkpoint = os.path.join(self.log_dir, ck_name)
+
+        # load model with the appropriate environment
+        self.model = PPO.load(full_checkpoint, env = self.env) # load model
+        
+        
+    def render_env(self, frame_rate:float = 30, num_frames:float = 500, name_suffix:str = None):
+        '''
+        render a video in the log_dir 
+        
+        Args:
+            frame_rate  :   frame rate in hertz for rendered video [30]
+            num_frames  :   number of frames to render [500]
+            name_app    :   suffix for video name. If None, will append current timestamp
+        '''
+        env = waterworld_v4.env(**env_kwargs, max_cycles = num_frames, render_mode = 'rgb_array') # load environment
+
+        # reward and rendering stuff
+        env.reset()
+        rewards = {agent:0 for agent in env.agents}
+        frame = np.ndarray(750,750,3,num_frames*len(env.agents))
+        model = self.model
+
+        # play through each turn
+        ii_loop = 0
+        for agent in env.agent_iter():
+            # get the action for this iteration
+            obs, reward, termination, truncation, info = env.last()
+
+            # get the rewards per agent
+            # have to do this separately since we're using AEC instead of parallel
+            for agent_r in env.agents:
+                rewards[agent_r] += env.rewards[agent_r]
+
+            # has the game stopped?
+            if termination or truncation:
+                break
+            else:
+                act = model.predict(obs, deterministic=True)[0]
+
+            env.step(act)
+            frame[:,:,:,ii_loop] = env.render()
+
+                
 
 
 

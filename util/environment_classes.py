@@ -3,8 +3,8 @@ import time
 import csv
 import pandas as pd
 from matplotlib import pyplot as plt
-from pprint import pprint
-import numpy as np
+# import numpy as np
+import cv2
 
 import supersuit as ss
 from stable_baselines3 import PPO
@@ -98,8 +98,8 @@ class waterworld_ppo():
 
         # save the current model checkpoint
         self.curr_chk = f"{self.env.unwrapped.metadata.get('name')}_{self.train_stepcount:09d}"
-        self.model.save(os.path.join(self.log_dir,self.curr_chk)) # save in the current file name
         self.train_stepcount += num_steps # keep track of how many steps we have trained
+        self.model.save(os.path.join(self.log_dir,self.curr_chk)) # save in the current file name
 
 
     def eval(self, num_games:int=100, render_mode:str=None ):
@@ -260,11 +260,11 @@ class waterworld_ppo():
             step_num = None
             # load the csv log so we can figure out which timepoint is the best
             log_pd = pd.read_csv(self.reward_csv_file)
-            log_pd_mean = log_pd.groupby('TrainStepCount')[[key for key in log_pd.keys() if 'pursuer' in key]].mean()
+            log_pd_mean = log_pd.groupby('TrainingStepCount')[[key for key in log_pd.keys() if 'pursuer' in key]].mean()
             # find the best/worst training epoch
-            if quality is 'best':
+            if quality == 'best':
                 extrema_ind = log_pd_mean.sum(axis=1).argmax() # training iteration with best total rewards
-            if quality is 'worst':
+            if quality == 'worst':
                 extrema_ind = log_pd_mean.sum(axis=1).argmin() # training iteration with worst total rewards
 
             extrema_step = log_pd_mean.index[extrema_ind] # get the stepcount with greatest average rewards
@@ -287,6 +287,11 @@ class waterworld_ppo():
             full_checkpoint = os.path.join(self.log_dir, ck_name)
 
         # load model with the appropriate environment
+        if not os.path.exists(full_checkpoint+'.zip'):
+            print(f'{full_checkpoint} does not exist')
+            return -1
+
+        # load the model with the environment
         self.model = PPO.load(full_checkpoint, env = self.env) # load model
         
         
@@ -299,16 +304,26 @@ class waterworld_ppo():
             num_frames  :   number of frames to render [500]
             name_app    :   suffix for video name. If None, will append current timestamp
         '''
+
+        env_kwargs = self.env_kwargs
         env = waterworld_v4.env(**env_kwargs, max_cycles = num_frames, render_mode = 'rgb_array') # load environment
 
         # reward and rendering stuff
         env.reset()
         rewards = {agent:0 for agent in env.agents}
-        frame = np.ndarray(750,750,3,num_frames*len(env.agents))
         model = self.model
 
+        # filename stuff
+        if name_suffix is None: # append the timestamp if the user doesn't include a suffix
+            name_suffix = time.strftime('%Y%m%d_%H%M%S')
+        filename = self.env.unwrapped.metadata['name']+name_suffix+'.mp4'
+        filename = os.path.join(self.log_dir,filename)
+        fps = frame_rate*len(env.agents) # to account for turns
+
+        # open the VideoWriter object, write all of the frames to it
+        vid_writer =  cv2.VideoWriter(filename, cv2.VideoWriter_fourcc(*'XVID'), fps, (750,750))
+       
         # play through each turn
-        ii_loop = 0
         for agent in env.agent_iter():
             # get the action for this iteration
             obs, reward, termination, truncation, info = env.last()
@@ -325,7 +340,10 @@ class waterworld_ppo():
                 act = model.predict(obs, deterministic=True)[0]
 
             env.step(act)
-            frame[:,:,:,ii_loop] = env.render()
+            frame = env.render()
+            vid_writer.write(frame)
+
+        vid_writer.release()
 
                 
 

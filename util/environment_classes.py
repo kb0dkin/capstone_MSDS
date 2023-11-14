@@ -53,7 +53,8 @@ class waterworld_ppo():
             env=train_env,
             tensorboard_log=os.path.join(log_dir,'tensorboard_logs'),
             learning_rate=1e-3,
-            batch_size=256
+            batch_size=256,
+            ent_coef = 0.01,
         )
     
         # initialize the csv reward file as necessary
@@ -62,17 +63,17 @@ class waterworld_ppo():
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
 
-        # insert a header row if needed, otherwise just write the current row
+        # insert a header row if needed
         reward_csv_file = os.path.join(log_dir,'reward_logs.csv')
-        # if not os.path.exists(reward_csv_file):
-        with open(reward_csv_file,'w') as fid:
-            writer = csv.writer(fid, lineterminator='\n')
-            # assemble the header row -- adjustable number of agents
-            header_row = ['Timestamp','TrainingStepCount','GameNumber']
-            agent_list = [f'{agent}' for agent in possible_agents]
-            header_row = header_row + agent_list
-            # write to csv
-            writer.writerow(header_row)
+        if not os.path.exists(reward_csv_file):
+            with open(reward_csv_file,'a') as fid:
+                writer = csv.writer(fid, lineterminator='\n')
+                # assemble the header row -- adjustable number of agents
+                header_row = ['Timestamp','TrainingStepCount','GameNumber']
+                agent_list = [f'{agent}' for agent in possible_agents]
+                header_row = header_row + agent_list
+                # write to csv
+                writer.writerow(header_row)
 
         # store parameters in instance
         self.env = train_env # training environment
@@ -237,7 +238,7 @@ class waterworld_ppo():
 
 
 
-    def load_version(self, quality:str = 'best', checkpoint_name:str = None, step_num:int = None):
+    def load_version(self, quality:str = None, checkpoint_name:str = None, step_num:int = None):
         '''
         load a specific checkpoint and save a video.
         The user can either specify the "quality" of the checkpoint (best or worst), 
@@ -252,9 +253,13 @@ class waterworld_ppo():
             checkpoint_name :   name of .zip checkpoint file
             step_num        :   training step number
         '''
-
+        
+        # set to load the best if nothing is loaded
+        if not checkpoint_name and not step_num and not quality:
+            quality = 'best'
+        
         # run either the best or worst
-        if quality is not None:
+        if (quality is not None):
             # override the other two
             checkpoint_name = None
             step_num = None
@@ -316,7 +321,7 @@ class waterworld_ppo():
         # filename stuff
         if name_suffix is None: # append the timestamp if the user doesn't include a suffix
             name_suffix = time.strftime('%Y%m%d_%H%M%S')
-        filename = self.env.unwrapped.metadata['name']+name_suffix+'.mp4'
+        filename = self.env.unwrapped.metadata['name']+'_'+name_suffix+'.mp4'
         filename = os.path.join(self.log_dir,filename)
         fps = frame_rate*len(env.agents) # to account for turns
 
